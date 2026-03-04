@@ -1,4 +1,5 @@
 import socket
+import json
 
 HOST = '127.0.0.1'
 PORT = 9000
@@ -23,20 +24,30 @@ def start_server():
                 try:
                     conn, addr = server_sock.accept()
                     with conn:
-                        print(f"Server: Connection from {addr}")
-                        data = conn.recv(1024).decode()
-                        print(f"Server: Received '{data}'")
+                        raw_data = conn.recv(1024).decode()
+                        payload = json.loads(raw_data)
+                        proxy_ip = payload.get("proxy_ip")
+                        message = payload.get("message")
 
-                        response = process_message(data)
-                        print(f"Server: Sending response '{response}'")
+                        print(f"----------------------------")
+                        print(f"Received from Proxy:")
+                        print(f"----------------------------")
+                        print(f'"{message}"')
+
+                        response = process_message(message)
+
+                        print(f"----------------------------")
+                        print(f"Sent to Proxy:")
+                        print(f"----------------------------")
+                        print(f'"{response}"')
+
                         conn.sendall(response.encode())
                 except ConnectionResetError:
-                    print("Server: Error, connection refused")
+                    print("Server: Error, connection reset")
                 except OSError as e:
-                    print("Server: Connection error, {e}")
+                    print(f"Server: Connection error, {e}")
     except OSError as e:
-        print(f"Server: failed to start server {e}")
-        
+        print(f"Server: Failed to start server {e}")
+
 if __name__ == "__main__":
     start_server()
-

@@ -15,18 +15,26 @@ IP_BLOCKLIST = {
     "198.51.100.7",
 }
 
-def forward_to_server(server_ip, message):
+def forward_to_server(server_ip, server_port, message):
     """Forward the message to the actual server and return its response."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect((server_ip, SERVER_PORT))
-            print(f"Proxy: Forwarding to server at {server_ip}:{SERVER_PORT}, message = '{message}'")
-            sock.sendall(message.encode())
+            sock.connect((server_ip, server_port))
+            proxy_ip = sock.getsockname()[0]
+            payload = json.dumps({"proxy_ip": proxy_ip, "message": message})
+            print(f"----------------------------")
+            print(f"Sent to Server:")
+            print(f"----------------------------")
+            print(f'"{message}"')
+            sock.sendall(payload.encode())
             response = sock.recv(1024).decode()
-            print(f"Proxy: Received from server: '{response}'")
+            print(f"----------------------------")
+            print(f"Received from Server:")
+            print(f"----------------------------")
+            print(f'"{response}"')
             return response
     except ConnectionRefusedError:
-        print(f"Proxy: Error, Could not connect to server at {server_ip}:{SERVER_PORT}.")
+        print(f"Proxy: Error, Could not connect to server at {server_ip}:{server_port}.")
         return "Server Connection Error"
     except TimeoutError:
         print(f"Proxy: Error, Connection to server timed out.")
@@ -37,13 +45,12 @@ def forward_to_server(server_ip, message):
 
 def handle_client(conn, addr):
     with conn:
-        print(f"\nProxy: New connection from {addr}")
         raw_data = conn.recv(4096).decode()
-        print(f"Proxy: Raw data received from client: {raw_data}")
 
         try:
             payload = json.loads(raw_data)
             server_ip = payload.get("server_ip")
+            server_port = payload.get("server_port", SERVER_PORT)
             message = payload.get("message")
 
             if not server_ip or not message:
@@ -52,7 +59,14 @@ def handle_client(conn, addr):
                 conn.sendall(error.encode())
                 return
 
-            print(f"Proxy: Parsed server_ip: {server_ip}, message: '{message}'")
+            print(f"----------------------------")
+            print(f"Received from Client:")
+            print(f"----------------------------")
+            print(f"data = {{")
+            print(f'  "server_ip": "{server_ip}"')
+            print(f'  "server_port": {server_port}')
+            print(f'  "message": "{message}"')
+            print(f"}}")
 
             # Check blocklist
             if server_ip in IP_BLOCKLIST:
@@ -62,8 +76,11 @@ def handle_client(conn, addr):
                 return
 
             # Forward to server
-            response = forward_to_server(server_ip, message)
-            print(f"Proxy: Sending final response to client: '{response}'")
+            response = forward_to_server(server_ip, server_port, message)
+            print(f"----------------------------")
+            print(f"Sent to Client:")
+            print(f"----------------------------")
+            print(f'"{response}"')
             conn.sendall(response.encode())
 
         except json.JSONDecodeError as e:
@@ -77,7 +94,7 @@ def start_proxy():
             proxy_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             proxy_sock.bind((PROXY_HOST, PROXY_PORT))
             proxy_sock.listen(5)
-            print(f"Proxy: Proxy server listening on {PROXY_HOST}:{PROXY_PORT}")
+            print(f"Proxy: Listening on {PROXY_HOST}:{PROXY_PORT}")
             print(f"Proxy: Blocked IPs: {IP_BLOCKLIST}\n")
 
             while True:
