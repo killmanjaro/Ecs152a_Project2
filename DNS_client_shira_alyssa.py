@@ -7,19 +7,20 @@ import time
 #Constants
 DNS_PORT = 53
 TIMEOUT = 10
+MAX_DEPTH = 10 
 
-#IANA root server IPv4 addresses
+# Official IANA root server IPv4 addresses
 ROOT_SERVERS = [
     "198.41.0.4",    
     "199.9.14.201",   
-    "192.33.4.12",  
-    "199.7.91.13",   
+    "192.33.4.12",    
+    "199.7.91.13",    
     "192.203.230.10", 
     "192.5.5.241",    
     "192.112.36.4",   
-    "198.97.190.53",  
+    "198.97.190.53", 
     "192.36.148.17",  
-    "192.58.128.30", 
+    "192.58.128.30",  
     "193.0.14.129",   
     "199.7.83.42",    
     "202.12.27.33"    
@@ -32,10 +33,10 @@ RECORD_TYPES = {
     28: "AAAA"
 }
 
-#DNS Packet Builder
+#DNS Packet Builder 
 def build_dns_query(domain):
     transaction_id = random.randint(0, 65535)
-    flags = 0x0000
+    flags = 0x0000  # standard query
     qdcount = 1
     ancount = nscount = arcount = 0
 
@@ -60,7 +61,7 @@ def build_dns_query(domain):
     question = qname + struct.pack("!HH", qtype, qclass)
     return header + question
 
-#DNS Parsing 
+#DNS Parsing Helper
 def parse_name(data, offset):
     labels = []
     jumped = False
@@ -68,7 +69,7 @@ def parse_name(data, offset):
 
     while True:
         length = data[offset]
-        if length & 0xC0 == 0xC0:
+        if length & 0xC0 == 0xC0:  # pointer
             pointer = struct.unpack("!H", data[offset:offset+2])[0]
             offset = pointer & 0x3FFF
             jumped = True
@@ -93,11 +94,11 @@ def parse_resource_record(data, offset):
     offset += rdlength
 
     value = None
-    if rtype == 1:
+    if rtype == 1:  # A
         value = socket.inet_ntoa(rdata)
-    elif rtype == 28:
+    elif rtype == 28:  # AAAA
         value = socket.inet_ntop(socket.AF_INET6, rdata)
-    elif rtype in (2, 5):
+    elif rtype in (2, 5):  # NS or CNAME
         value, _ = parse_name(data, offset - rdlength)
 
     return {
@@ -141,8 +142,11 @@ def dns_query(server_ip, domain):
 
     return answers, authorities, additionals, rtt
 
-#Iterative Resolver
-def resolve_domain(domain):
+# Iterative Resolver
+def resolve_domain(domain, depth=0):
+    if depth > MAX_DEPTH:
+        raise RuntimeError("Maximum DNS resolution depth exceeded")
+
     servers = ROOT_SERVERS[:]
 
     while True:
@@ -163,17 +167,27 @@ def resolve_domain(domain):
 
         print(f"RTT: {rtt:.2f} ms")
 
+        # Final answer found
         for rr in answers:
             if rr["type"] == "A":
                 return rr["value"]
 
+        # Prefer glue records
         next_servers = [rr["value"] for rr in additionals if rr["type"] == "A"]
+
+        # Handle glue-less NS referral
         if not next_servers:
-            raise RuntimeError("No referral IPs found")
+            ns_names = [rr["value"] for rr in authorities if rr["type"] == "NS"]
+            if not ns_names:
+                raise RuntimeError("No NS records to continue resolution")
+
+            # Resolve NS hostname to IP
+            ns_ip = resolve_domain(ns_names[0], depth + 1)
+            next_servers = [ns_ip]
 
         servers = next_servers
 
-#HTTP Request
+#HTTP Request 
 def make_http_request(ip, domain):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -194,7 +208,7 @@ def make_http_request(ip, domain):
     status_line = response.split("\r\n")[0]
     return status_line, rtt
 
-#Main
+# Main 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python3 DNS_client.py <domain>")
